@@ -6,8 +6,11 @@
   uv run --no-project python scripts/apply.py --list shortlists/短名单_YYYYMMDD.csv
   uv run --no-project python scripts/apply.py --list <同名 csv> --confirm
 
-关于判定：`user-apply-job` 的真实返回结构**尚未实测**（投递不可逆，没敢拿真岗位试）。
-所以这里打印原始响应全文，并且**只在能判出成功时才记成功**；判不出一律 unknown 且不写台账。
+关于判定（2026-09-23 两种回包都实测到了）：
+  应聘成功 {"data": {"result": "应聘成功"}, "errCode": 0}
+  重复投递 {"data": {"result": "应聘失败: 您已投递过该职位！"}, "errCode": 0}
+`errCode` 在两种情形下**都是 0**，所以它**不是业务结论**；结论只能看 `data.result` 里的中文。
+这里仍打印原始响应全文，并且**只在能判出成功时才记成功**；判不出一律 unknown 且不写台账。
 漏记可以人工补，假记会让这个岗位被永久排除。
 """
 from __future__ import annotations
