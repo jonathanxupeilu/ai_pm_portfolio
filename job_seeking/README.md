@@ -12,28 +12,29 @@
 
 ## 怎么跑
 
-本机的 `python` / `python3` 是 WindowsApps 假壳（退出码 49、无输出），`py` 也不在 PATH。
-唯一可用的是 uv，所以**所有命令都走 uv**：
+`python` / `python3` / `pip` 直接可用（本机 `~/.local/bin` 里放着指向 uv 3.12.13 的 shim）：
 
 ```bash
 cd job_seeking
 
 # 0) 自检：MCP 通道 + 令牌是否可用（只读）
-uv run --no-project python scripts/liepin.py --probe
+python scripts/liepin.py --probe
 
 # 1) 搜岗入池（按 jobId 去重；额度敏感，先 1 页）
-uv run --no-project python scripts/search.py --pages 1
+python scripts/search.py --pages 1
 
 # 2) 拉正文打分（正文用完即弃，不落盘）
-uv run --no-project python scripts/score.py
+python scripts/score.py
 
 # 3) 出短名单（按匹配度降序、排除已投、默认取前 15）
-uv run --no-project python scripts/shortlist.py
+python scripts/shortlist.py
 
 # 4) 投递：先看 dry-run 清单，确认无误再加 --confirm
-uv run --no-project python scripts/apply.py --list shortlists/短名单_YYYYMMDD.csv
-uv run --no-project python scripts/apply.py --list shortlists/短名单_YYYYMMDD.csv --confirm
+python scripts/apply.py --list shortlists/短名单_YYYYMMDD.csv
+python scripts/apply.py --list shortlists/短名单_YYYYMMDD.csv --confirm
 ```
+
+`uv run --no-project python ...` 也仍然有效，两条等价。
 
 第 4 步是**外部且不可逆**的动作。`--confirm` 之前不会发出任何请求，dry-run 就是给你看的。
 确认清单没问题、你本人点头之后，才加 `--confirm`。
@@ -64,10 +65,11 @@ job_seeking/
 
 ```bash
 cd job_seeking
-uv run --no-project python -m unittest discover -s tests -t tests
+pytest -q                                      # 以后走这个
+python -m unittest discover -s tests -t tests  # 等价的 unittest 入口
 ```
 
-89 个测试，三层，全部只在 tmp 里跑、全程不出网（行覆盖 95%）：
+91 个测试，三层，全部只在 tmp 里跑、全程不出网（行覆盖 95%）：
 
 - **单元**：同进程直接调各脚本的 `main(argv)`，用 `store` 的路径常量重定向到 tmp 隔离。
 - **集成**：网络指向 `tests/fake_liepin.py`——一个只绑 `127.0.0.1` 的假猎聘。真跑的是
@@ -94,7 +96,7 @@ uv run --no-project python -m unittest discover -s tests -t tests
 
 ```bash
 $ vim criteria.md          # 比如加一行 | Agentic | 1 |
-$ uv run --no-project python scripts/score.py
+$ python scripts/score.py
 ⚠️  打分口径变了（当前 keyword:...）：59 个岗位的分数是旧口径算的，本次一并重算。
 ```
 

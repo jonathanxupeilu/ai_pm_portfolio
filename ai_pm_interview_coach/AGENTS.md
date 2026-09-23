@@ -5,12 +5,6 @@ This file provides guidance to the AI agent when working with code in this repos
 本目录是新建项目，目前没有代码。这份文件**只记录本机/本仓库特有、不写就一定会踩**的几条；
 产品设计、目录结构、运行命令等定下来之后再补，现在写了也只是猜。
 
-## 怎么跑 Python
-
-本机 `python` / `python3` 是 WindowsApps 假壳（退出码 49、零输出），`py` 不在 PATH。
-**一律用**：`uv run --no-project python <脚本>`（需要时前缀 `PYTHONUTF8=1`）。
-脚本只用标准库——加第三方依赖前先问，别默认 `pip install`。
-
 ## 令牌（红线）
 
 猎聘令牌只从 `~/.workbuddy/mcp.json` 读（`mcpServers.liepin-mcp.headers.x-user-token`）。
