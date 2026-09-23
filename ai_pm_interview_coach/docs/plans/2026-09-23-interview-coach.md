@@ -2272,7 +2272,6 @@ def test_weak_treats_last_correct_as_not_weak(banked):
     rc, out, _ = run_cli(attempts.main, ["weak"])
     assert rc == 1, "没有弱项时是空结果，不是成功——不写这条的话本用例为假也过"
     assert banked[0] not in out
-    assert banked[0] not in out
 
 
 def test_weak_on_empty_is_not_silently_fine(banked):
