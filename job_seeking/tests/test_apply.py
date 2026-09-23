@@ -129,12 +129,13 @@ class CallFailureIsUnknownNotASuccess(PipelineTestCase):
 
 
 class RealResponseShapesFromTheLiveEndpoint(PipelineTestCase):
-    """2026-09-23 对真实端点实测的回包（拿台账里已有的 jobId 投，服务端按重复投递拒绝）。
+    """两种回包都是 2026-09-23 对真实端点实测到的，不是编的。
 
-    最重要的一条：`errCode` 是 **0**，但这次投递是**失败**的。所以 `errCode == 0`
-    只说明「请求被处理了」，绝不等于「投递成功」——拿它当成功判据会假记台账。
+    最重要的一条：**`errCode` 在成功和失败两种情形下都是 0**。所以 `errCode == 0`
+    只说明「请求被处理了」，绝不能当成功判据——拿它判定会把重复投递假记成成功。
     """
 
+    REAL_SUCCESS = {"data": {"result": "应聘成功"}, "errCode": 0}
     REAL_DUPLICATE = {"data": {"result": "应聘失败: 您已投递过该职位！"}, "errCode": 0}
 
     def run_with(self, resp) -> tuple[int, str]:
@@ -142,9 +143,22 @@ class RealResponseShapesFromTheLiveEndpoint(PipelineTestCase):
         with unittest.mock.patch.object(apply_mod.liepin, "apply_job", return_value=resp):
             return self.run_cli(apply_mod, ["--list", str(path), "--confirm"])
 
+    def test_real_success_envelope_is_recorded_as_success(self):
+        rc, _ = self.run_with(self.REAL_SUCCESS)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(store.load_ledger()[0]["status"], "成功")
+
     def test_real_duplicate_envelope_is_a_failure_despite_errcode_zero(self):
         self.run_with(self.REAL_DUPLICATE)
         self.assertEqual(store.load_ledger()[0]["status"], "失败")
+
+    def test_the_same_err_code_yields_opposite_verdicts(self):
+        """把这条钉死：errCode 相同而结论相反，所以判定只能看 data.result。"""
+        self.assertEqual(self.REAL_SUCCESS["errCode"], self.REAL_DUPLICATE["errCode"])
+
+        self.assertEqual(apply_mod.classify(self.REAL_SUCCESS)[0], "成功")
+        self.assertEqual(apply_mod.classify(self.REAL_DUPLICATE)[0], "失败")
 
     def test_errcode_zero_without_a_marker_word_is_unknown_not_success(self):
         rc, _ = self.run_with({"data": {"result": "已受理"}, "errCode": 0})
@@ -153,7 +167,7 @@ class RealResponseShapesFromTheLiveEndpoint(PipelineTestCase):
         self.assertFalse(store.LEDGER_PATH.exists(), "errCode 0 不是成功判据")
 
     def test_the_raw_envelope_is_kept_in_the_ledger_for_audit(self):
-        self.run_with(self.REAL_DUPLICATE)
+        self.run_with(self.REAL_SUCCESS)
         self.assertIn("errCode", store.load_ledger()[0]["resultText"])
 
 
