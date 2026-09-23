@@ -55,9 +55,28 @@ job_seeking/
     ├── score.py         拉正文 → 算分 → 写回池
     ├── shortlist.py     排序 + 排除已投 + 截断
     └── apply.py         投递（默认 dry-run，--confirm 才真投）
+└── tests/               三层测试：单元 / 集成（本机假服务）/ 端到端（真子进程）
 ```
 
 `pool/`、`ledger.csv`、`shortlists/` 已在 `.gitignore` 里挡住——里面有真实公司名和岗位信息。
+
+## 测试
+
+```bash
+cd job_seeking
+uv run --no-project python -m unittest discover -s tests -t tests
+```
+
+89 个测试，三层，全部只在 tmp 里跑、全程不出网（行覆盖 95%）：
+
+- **单元**：同进程直接调各脚本的 `main(argv)`，用 `store` 的路径常量重定向到 tmp 隔离。
+- **集成**：网络指向 `tests/fake_liepin.py`——一个只绑 `127.0.0.1` 的假猎聘。真跑的是
+  真实的 HTTP 请求、SSE 解析、正则抽正文，不是「某个函数被调用过」。
+- **端到端**：把项目拷进 tmp、`USERPROFILE` 指向假家目录（于是 `~/.workbuddy/mcp.json`
+  解析到夹具），用真子进程按顺序跑完 search → score → shortlist → apply。
+
+`--confirm` 分支只在指向本机假服务时被测试，且跑之前会断言地址是 `127.0.0.1`。
+真实的 `pool/`、`ledger.csv`、`shortlists/` 前后字节一致，有一条测试专门钉这件事。
 
 ## 打分怎么算
 
@@ -98,6 +117,7 @@ $ uv run --no-project python scripts/score.py
 | MCP 端点 | `https://open-agent.liepin.com/mcp/user`，协议 `2024-11-05` |
 | 搜索工具 | `user-search-job`，**`page` 从 0 开始**，每页 20 条 |
 | 投递工具 | `user-apply-job`，参数 `jobId`(数字) + `jobKind`(字符串) |
+| 投递返回 | `{"data": {"result": "应聘失败: 您已投递过该职位！"}, "errCode": 0}`（实测 2026-09-23）。**`errCode` 是 0，但这次投递是失败的**——`errCode` 只表示「请求被处理了」，不是成功判据 |
 | `jobKind` 从哪来 | **就是搜索返回的 `jobType`**，直接透传。实测同一批里既有 `"1"` 也有 `"2"`——不要假设它恒为 `"2"`，也不要自己推导 |
 | JD 正文 | 只能从 `jobDetailUrl` 的页面里取，正文在 `<dd data-selector="job-intro-content">` 内 |
 | 不存在的岗位 | 返回 **HTTP 200** + 一个 5KB 的「此页面似乎不存在」占位页。所以 200 ≠ 岗位页存在 |
@@ -117,8 +137,10 @@ $ uv run --no-project python scripts/score.py
 - **没有简历环节。** 本流程不产出、也不保存任何一岗一版简历：池子里只有 jobId / 链接 / 分数，
   抓到的正文用完即弃。将来如果真加了简历环节，必须同批补一个投后清理步骤并把结果写进台账，
   否则文件会开始累积。
-- **`user-apply-job` 的真实返回结构尚未实测**（投递不可逆，没拿真岗位试过）。
-  所以 `apply.py` 会打印原始响应全文，按「能判成功才记成功」保守处理；拿到真实回包后再收紧判定。
+- **投递回包只在「重复投递」这一种情形下实测过。** 2026-09-23 拿台账里已有的 jobId 投了一次，
+  回包是 `{"data": {"result": "应聘失败: 您已投递过该职位！"}, "errCode": 0}`——注意 `errCode` 是 0。
+  所以判定逻辑**不碰 `errCode`**，只看 `data.result` 里的中文，并且先判失败标记再判成功标记。
+  **投递成功时的回包仍未实测**，拿到真实回包前判定保持保守。
 - **站点改版会让抽取失效。** 抽不到正文时报的是**事实**（HTTP 状态、页面字节数、标题），
   不给一个猜的原因——猜的原因（比如「改版了」）会让人往错方向查。
 - 猎聘搜索和岗位页都有额度/频率限制，`--pages` 默认保守；批量打分是逐岗串行请求。
