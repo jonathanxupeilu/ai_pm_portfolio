@@ -22,8 +22,16 @@ def test_ruff_is_configured():
 
 
 def test_scripts_and_tests_are_clean(ruff):
-    r = subprocess.run([ruff, "check", "scripts", "tests"],
-                       cwd=ROOT, capture_output=True, text=True)
+    """闸门范围 = 所有会执行代码的地方，含 docs/plans 下那两个计划辅助脚本。
+
+    计划本身是要被抽出来跑的（`build_plan_check.py`），它不干净就等于
+    「验证工具自己游离在被验证之外」。范围悄悄变小由下一条 assert 兜住。
+    """
+    helpers = sorted((ROOT / "docs" / "plans").glob("*.py"))
+    assert helpers, "docs/plans 下的计划辅助脚本没被发现——闸门范围在无声缩小"
+    r = subprocess.run(
+        [ruff, "check", "scripts", "tests", *(str(p.relative_to(ROOT)) for p in helpers)],
+        cwd=ROOT, capture_output=True, text=True)
     assert r.returncode == 0, f"ruff 报了问题，先修再提交：\n{r.stdout}{r.stderr}"
 
 

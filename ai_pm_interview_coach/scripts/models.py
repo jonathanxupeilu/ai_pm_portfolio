@@ -66,10 +66,20 @@ def _q12(v: str) -> str:
     return v
 
 
+def _resume_body(v: str) -> str:
+    """简历正文判空。不复用 `_non_blank` 的文案：那条只说「不能是空白」，
+    而这里空-body 有两种成因（没登录 / 真没写过），要往「读不到」上引。
+    """
+    if not v.strip():
+        raise ValueError("result 是空的——简历读不到，不是没写过")
+    return v.strip()
+
+
 Text = Annotated[str, AfterValidator(_non_blank)]
 Kind = Annotated[str, AfterValidator(_kind)]
 Verdict = Annotated[str, AfterValidator(_verdict)]
 Fingerprint = Annotated[str, AfterValidator(_q12)]
+ResumeBody = Annotated[str, AfterValidator(_resume_body)]
 
 
 class _Strict(BaseModel):
@@ -117,7 +127,7 @@ class AttemptInput(_Strict):
 
 class ResumeData(_Strict):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
-    result: Text = Field(description="简历正文（markdown）")
+    result: ResumeBody = Field(description="简历正文（markdown）")
 
 
 class ResumeEnvelope(_Strict):

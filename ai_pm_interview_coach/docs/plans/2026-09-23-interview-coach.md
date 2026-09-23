@@ -613,10 +613,20 @@ def _q12(v: str) -> str:
     return v
 
 
+def _resume_body(v: str) -> str:
+    """简历正文判空。不复用 `_non_blank` 的文案：那条只说「不能是空白」，
+    而这里空-body 有两种成因（没登录 / 真没写过），要往「读不到」上引。
+    """
+    if not v.strip():
+        raise ValueError("result 是空的——简历读不到，不是没写过")
+    return v.strip()
+
+
 Text = Annotated[str, AfterValidator(_non_blank)]
 Kind = Annotated[str, AfterValidator(_kind)]
 Verdict = Annotated[str, AfterValidator(_verdict)]
 Fingerprint = Annotated[str, AfterValidator(_q12)]
+ResumeBody = Annotated[str, AfterValidator(_resume_body)]
 
 
 class _Strict(BaseModel):
@@ -664,7 +674,7 @@ class AttemptInput(_Strict):
 
 class ResumeData(_Strict):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
-    result: Text = Field(description="简历正文（markdown）")
+    result: ResumeBody = Field(description="简历正文（markdown）")
 
 
 class ResumeEnvelope(_Strict):
@@ -742,7 +752,7 @@ BANK_FIELDS = tuple(BankRow.model_fields)
 ATTEMPT_FIELDS = tuple(AttemptRow.model_fields)
 ```
 
-### 三处值得停一下的地方
+### 四处值得停一下的地方
 
 1. **`_non_blank` 里自己 `strip()`，同时又开了 `str_strip_whitespace`。**
    看着重复，但不是：配置那个开关负责**所有** str 字段（含可空的 `target`），
@@ -751,7 +761,11 @@ ATTEMPT_FIELDS = tuple(AttemptRow.model_fields)
    那是外部系统的返回体，人家多给字段是常态；
    而行模型的键是**我们自己**定的，多出来一个就是拼错了。
    **同一条规则在两个方向上不一样，这是刻意的**——别「统一」成一样。
-3. **`parse_row` 返回 dict 而不是模型实例**，因为 `store` 后面要按
+3. **简历正文用 `ResumeBody` 而不是复用 `Text`。**
+   判空逻辑一样，文案不一样：`Text` 只说「不能是空白」，而空 body 有两种成因
+   （没登录 / 真没写过），得往「读不到」上引——Task 7 的集成测试断言的就是这句话。
+   两处报错文案不同时，就该有两个 validator，而不是给 `_non_blank` 加参数。
+4. **`parse_row` 返回 dict 而不是模型实例**，因为 `store` 后面要按
    `BANK_FIELDS` 的顺序序列化，dict 更省事，也让 `store` 不依赖 pydantic 的 API。
 
 ### Step 4 跑绿
@@ -1343,6 +1357,7 @@ def test_remove_prints_what_it_deleted(data_dir):
 `tests/test_bank_sample.py`：
 
 ```python
+import pytest
 import store
 from support import attempt_row, bank_row, run_cli, write_jsonl
 
@@ -1457,7 +1472,25 @@ def test_kind_outside_whitelist_is_rejected(data_dir):
     seed_bank(3)
     rc, _, _ = run_cli(bank.main, ["sample", "--kind", "瞎写"])
     assert rc != 0
+
+
+@pytest.mark.parametrize("bad", ['"5"', "true", "0", "null", "1.5", "{}"])
+def test_config_per_round_is_type_checked(bad, data_dir):
+    """`-n` 有 argparse 兜着，`per_round` 只有 `cmd_sample` 那一句守着。
+
+    不喂坏值就是没测：那句 `isinstance` 一旦被人「简化」成 `int(cfg[...])`，
+    true / null / {} 都会悄悄变成一个能抽题的数。
+    """
+    store.CONFIG_PATH.write_text(f'{{"per_round": {bad}}}', encoding="utf-8")
+    seed_bank(5)
+    rc, _, err = run_cli(bank.main, ["sample"])
+    assert rc == 1
+    assert "per_round" in err
 ```
+
+（`per_round` 那条是后来补的：`-n` 有 argparse 把类型守住，配置文件里的数没有——
+它直接落到 `cmd_sample` 的 `isinstance` 那一句上。没有这条测试，把那句「简化」成
+`int(cfg[...])` 全量测试照样全绿。）
 
 ### Step 2 跑红
 
@@ -1557,7 +1590,7 @@ def cmd_sample(args) -> int:
 
 ### Step 4 跑绿
 
-期望 75 passed（models 27 + store 19 + add/show 9 + list 5 + remove 3 + sample 12）。
+期望 81 passed（models 27 + store 19 + add/show 9 + list 5 + remove 3 + sample 18）。
 
 **提交：** `出题教练 bank list/remove/sample：--seed 可复现，抽不到题不是成功`
 
@@ -1700,6 +1733,11 @@ def test_load_endpoint_returns_url_and_token(tmp_path, monkeypatch):
 3. `_rpc` 的 `Accept` 头和 SSE `data:` 行抽取照抄——**服务端走 SSE 风格，正文在
    `data:` 行里**，省了线上就会解析失败。
 
+业务规则（`errCode` 必须为 0、`result` 不能空）不在这里重写，交给
+`models.parse_envelope`——和 Task 2 那句「校验规则只写一次」是同一件事。
+`resume.py` 只保留 **MCP 协议层**的剥壳（HTTP → JSON-RPC → content[0].text 的 JSON），
+那部分是本文件特有的，没有可复用的模型。
+
 ```python
 """读猎聘在线简历（my-resume）。本项目唯一的外呼。
 
@@ -1717,6 +1755,8 @@ import pathlib
 import sys
 import urllib.error
 import urllib.request
+
+import models
 
 SERVER_NAME = "liepin-mcp"
 RESUME_TOOL = "my-resume"
@@ -1787,11 +1827,13 @@ def fetch_resume() -> str:
     实测形状：content[0].text 是 JSON
     {"data": {"result": <2745 字 markdown 文本>}, "errCode": 0}。
     errCode 非 0 或 result 为空都算失败——协议成功不等于业务有结论。
+    这两条的判断规则在 `models.ResumeEnvelope`，不在这里重写一遍。
     """
     resp = _rpc("tools/call", {"name": RESUME_TOOL, "arguments": {}}, 3)
     if "error" in resp:
         raise RuntimeError(f"MCP 调用 {RESUME_TOOL} 出错：{resp['error']}")
     result = resp.get("result") or {}
+    # 下面是 MCP 协议层的剥壳，不是业务规则：拿 content[0].text 那段 JSON 文本。
     text = next((c.get("text") for c in (result.get("content") or [])
                  if c.get("type") == "text"), None)
     if text is None:
@@ -1800,12 +1842,7 @@ def fetch_resume() -> str:
         data = json.loads(text)
     except json.JSONDecodeError:
         raise RuntimeError(f"{RESUME_TOOL} 的 content 不是 JSON：{text[:200]}") from None
-    if (data or {}).get("errCode") != 0:
-        raise RuntimeError(f"{RESUME_TOOL} 业务失败 errCode={(data or {}).get('errCode')!r}")
-    body = ((data or {}).get("data") or {}).get("result")
-    if not isinstance(body, str) or not body.strip():
-        raise RuntimeError(f"{RESUME_TOOL} 返回的 result 是空的——简历读不到，不是没写过")
-    return body
+    return models.parse_envelope(data).result
 
 
 def main(argv: list[str]) -> int:
@@ -1814,7 +1851,7 @@ def main(argv: list[str]) -> int:
         return 0
     try:
         sys.stdout.write(fetch_resume())
-    except RuntimeError as e:
+    except (RuntimeError, models.EnvelopeError) as e:
         print(f"❌ 读在线简历失败：{e}", file=sys.stderr)
         return 1
     except SystemExit as e:
@@ -1833,7 +1870,7 @@ if __name__ == "__main__":
 
 ### Step 4 跑绿
 
-期望 85 passed（新增 10）。
+期望 91 passed（新增 10）。
 
 **提交：** `出题教练 resume.py：my-resume 硬编码白名单，配置缺失显式退出`
 
@@ -2103,7 +2140,7 @@ Task 6 已经把 `resume.py` 写完了，所以这一步**预期大部分直接�
 ```bash
 cd ai_pm_interview_coach && python -m pytest tests/test_resume_integration.py -q
 ```
-期望 13 passed；全量 98 passed。
+期望 13 passed；全量 104 passed。
 
 **提交：** `出题教练集成测试：假 MCP 钉住 my-resume、令牌不外泄、失败非零退出`
 
@@ -2437,7 +2474,7 @@ if __name__ == "__main__":
 
 ### Step 4 跑绿
 
-期望 17 passed（新增 17）；全量 115 passed。
+期望 17 passed（新增 17）；全量 121 passed。
 
 **提交：** `出题教练 attempts.py：追加式留痕 + history/weak，无弱项不是成功`
 
@@ -2610,7 +2647,7 @@ def real_data_untouched():
 ```bash
 cd ai_pm_interview_coach && python -m pytest tests -q
 ```
-期望 115 + 3 = 118 passed。
+期望 121 + 3 = 124 passed。
 
 再跑一次 job_seeking 的老套件，确认没跨项目串味：
 
@@ -2657,8 +2694,16 @@ def test_ruff_is_configured():
 
 
 def test_scripts_and_tests_are_clean(ruff):
-    r = subprocess.run([ruff, "check", "scripts", "tests"],
-                       cwd=ROOT, capture_output=True, text=True)
+    """闸门范围 = 所有会执行代码的地方，含 docs/plans 下那两个计划辅助脚本。
+
+    计划本身是要被抽出来跑的（`build_plan_check.py`），它不干净就等于
+    「验证工具自己游离在被验证之外」。范围悄悄变小由下一条 assert 兜住。
+    """
+    helpers = sorted((ROOT / "docs" / "plans").glob("*.py"))
+    assert helpers, "docs/plans 下的计划辅助脚本没被发现——闸门范围在无声缩小"
+    r = subprocess.run(
+        [ruff, "check", "scripts", "tests", *(str(p.relative_to(ROOT)) for p in helpers)],
+        cwd=ROOT, capture_output=True, text=True)
     assert r.returncode == 0, f"ruff 报了问题，先修再提交：\n{r.stdout}{r.stderr}"
 
 
@@ -2718,20 +2763,23 @@ ruff check --fix scripts tests      # 能自动修的先让 ruff 自己修
 
 脚本只做确定性的活；搜索、出题、判分由会话里的 AI 做。
 
+命令都用项目 venv 里的解释器跑（`.venv/Scripts/python`，Windows）：
+三个脚本都 `import models` → 需要 pydantic，裸 `python` 那个 shim 里没有。
+
 ## 一轮怎么用
 
-    python scripts/resume.py                      # 读在线简历，我据此出题的靶子
-    python scripts/bank.py sample --fresh         # 抽本轮题（只出 id）
-    python scripts/bank.py show <id>              # 看题面和参考答案
+    .venv/Scripts/python scripts/resume.py                      # 读在线简历，我据此出题的靶子
+    .venv/Scripts/python scripts/bank.py sample --fresh         # 抽本轮题（只出 id）
+    .venv/Scripts/python scripts/bank.py show <id>              # 看题面和参考答案
     # 我作答 → AI 搜索面经、出题、判分
     echo '{"qid":"<id>","answer":"…","verdict":"部分对","feedback":"…"}' \
-      | python scripts/attempts.py record         # 留痕
-    python scripts/attempts.py weak               # 现在哪几题还不行
+      | .venv/Scripts/python scripts/attempts.py record         # 留痕
+    .venv/Scripts/python scripts/attempts.py weak               # 现在哪几题还不行
 
 ## 加真题
 
     echo '{"question":"…","refAnswer":"…","kind":"简历深挖","source":"…"}' \
-      | python scripts/bank.py add
+      | .venv/Scripts/python scripts/bank.py add
 
 同指纹（同题面）会**拒绝且不覆盖**，所以导入可以重复跑。
 
@@ -2746,15 +2794,23 @@ ruff check --fix scripts tests      # 能自动修的先让 ruff 自己修
 只从 `~/.workbuddy/mcp.json` 读，只读 `my-resume`，不落盘、不打印、不进 git。
 ```
 
+**命令必须写全解释器路径，不能写裸 `python`。** 这一版初稿写的是
+`python scripts/bank.py add`，照它敲会直接 `ModuleNotFoundError: pydantic`——
+用户级 PATH 上那个 `python` shim 指向的解器里没有第三方库，而 Task 2 之后
+每个脚本都 `import models`。README 是「照着敲就对」的地方，这种地方错一次
+就会被当成产品坏了。
+
 **提交：** `出题教练 README：一轮的实际命令序列与退出码约定`
 
 ---
 
 ## 完成标准
 
-- [ ] `cd ai_pm_interview_coach && .venv/Scripts/python -m pytest tests -q` 全绿（121 个用例）。
-- [ ] 其中 `test_lint.py` 三条是绿的——即 `ruff check scripts tests` 零输出，
+- [ ] `cd ai_pm_interview_coach && .venv/Scripts/python -m pytest tests -q` 全绿（127 个用例）。
+- [ ] 其中 `test_lint.py` 三条是绿的——即 `ruff check scripts tests docs/plans/*.py` 零输出，
       且它自证的「闸门有牙齿」那条也过（不是靠 select 配空换来的绿）。
+- [ ] 每条 `isinstance` / 白名单式的手写校验，都有一个「喂它一个错类型」的用例。
+      尤其**从 `config.json` 读出来的数**——它没有 argparse 那一层兜着。
 - [ ] `cd ../job_seeking && python -m pytest tests -q` 仍 91 全绿。
 - [ ] 手工跑一遍 `resume.py`，确认能读到真简历、且 `git status` 干净（没有新文件冒出来）。
 - [ ] 真 `bank/`、`attempts/` 在整个测试会话里字节不变（守卫测试红过就说明没做到）。
@@ -2776,7 +2832,7 @@ ruff check --fix scripts tests      # 能自动修的先让 ruff 自己修
 
 ---
 
-## 附录：这份计划已经跑过两遍（2026-09-23）
+## 附录：这份计划已经跑过三遍（2026-09-23）
 
 ### 怎么复现这次验证
 
@@ -2787,26 +2843,27 @@ cd ai_pm_interview_coach
 
 `docs/plans/build_plan_check.py` 把计划里每个任务的代码块**原样**抽到一个临时目录
 （`models.py` / `store.py` / `bank.py` / `resume.py` / `attempts.py` + `fake_mcp.py`
-+ 全部测试 + `conftest.py` + `ruff.toml`），然后直接 `pytest`。
++ 全部测试 + `conftest.py` + `ruff.toml`），再把 `docs/plans/*.py` 本身也拷进去
+（lint 闸门的范围含它们），然后直接 `pytest`。
 改完计划就重跑一次——表里的数字是这么来的，不是我估的。
 `docs/plans/patch_lines.py` 是配套的定点改写工具（按行号替换、先断言原文），
 用来避免「全局 replace 打错地方」——这个错我真犯过，见下面第 2 条。
 
 ### 全量结果
 
-`121 passed in 14.96s`。按文件的用例数（`--collect-only -q`）：
+`127 passed`（第三遍；秒数每次不同，不抄进来当事实）。按文件的用例数（`--collect-only -q`）：
 
 | 文件 | 用例 | 属于 | 累计 |
 | --- | --- | --- | --- |
 | `test_models.py` | 27 | Task 2 | 27 |
 | `test_store.py` | 19 | Task 3 | 46 |
 | `test_bank_add.py` | 9 | Task 4 | 55 |
-| `test_bank_list.py` / `test_bank_remove.py` / `test_bank_sample.py` | 5 + 3 + 12 | Task 5 | 75 |
-| `test_resume_config.py` | 10 | Task 6 | 85 |
-| `test_resume_integration.py` | 13 | Task 7 | 98 |
-| `test_attempts.py` | 17 | Task 8 | 115 |
-| `test_e2e.py` | 3 | Task 9 | 118 |
-| `test_lint.py` | 3 | Task 10 | **121** |
+| `test_bank_list.py` / `test_bank_remove.py` / `test_bank_sample.py` | 5 + 3 + 18 | Task 5 | 81 |
+| `test_resume_config.py` | 10 | Task 6 | 91 |
+| `test_resume_integration.py` | 13 | Task 7 | 104 |
+| `test_attempts.py` | 17 | Task 8 | 121 |
+| `test_e2e.py` | 3 | Task 9 | 124 |
+| `test_lint.py` | 3 | Task 10 | **127** |
 
 **所以逐任务执行时，跑红跑绿的数量应当和这张表一致。**
 对不上就是环境或抄写有出入，先查清楚再往下走。
@@ -2858,7 +2915,41 @@ cd ai_pm_interview_coach
 7. **`store` 顶部 docstring 里一句 markup 写坏了**（`**接上_row 行号_再抛出去`），
    读起来是噪声。改平。
 
+### 第三遍（补「lint / pydantic 到底覆盖全了没」的审计）跑出来的
+
+这次的入口不是「计划有没有跑绿」，而是问了一句「校验和 lint 都覆盖了吗」，
+然后**用 grep 回答、不凭记忆**。答案有三处没覆盖，都是前两遍的绿灯遮住的。
+
+8. **`models.parse_envelope` 是死代码。** 它有 4 条单测、全绿，但**生产路径没人调**——
+   `resume.py` 把 `errCode != 0` 和「result 是空的」两条判断**又手写了一遍**，
+   文案还和模型那条不一样。Task 2 开头写的纪律就是「校验规则只写这一次」，
+   唯独简历这条线破了。改成 `return models.parse_envelope(data).result`，
+   手写那 5 行删掉。
+   顺带把 `ResumeData.result` 从 `Text` 换成新的 `ResumeBody`（见 Task 2 第 3 点）：
+   空 body 该说「简历读不到，不是没写过」，不是 `Text` 的「不能是空白文本」。
+   **教训：一个函数只被自己的单测调用，不等于被使用。** 判覆盖率要 grep 调用方，
+   不能看「这个函数有没有对应的 test」。
+
+9. **`per_round` 的类型守卫一条测试都没有。** `-n` 有 argparse 兜着，所以有人测；
+   配置文件的数没有 argparse，只隔着 `cmd_sample` 里那一句 `isinstance`——
+   而把那句「简化」成 `int(cfg[...])`，`true` / `null` / `{}` 都能变成一个能抽题的数，
+   全量测试仍然全绿。补了 6 个参数的 `test_config_per_round_is_type_checked`。
+
+10. **lint 闸门只盖 `scripts tests`，`docs/plans/` 那两个 `.py` 在门外。**
+    那两个脚本是要被抽出来跑的（`build_plan_check.py` 本身就是验证工具），
+    它们不干净 = 验证工具自己游离在被验证之外。
+    `test_scripts_and_tests_are_clean` 改成把 `docs/plans/*.py` 一起收进范围，
+    并加 `assert helpers` 兜住「glob 没匹配到、范围无声变小」。
+    **改完立刻抓到我自己当天新写的一行**：`'{"per_round": %s}' % bad` → UP031，
+    换成 f-string。第 9 条补的测试正是那行所在的文件——顺序反了的话，
+    这条会作为「上一轮遗留」出现，而不是「新代码当场被拦」。（`build_plan_check.py`
+    相应要把 `docs/plans/*.py` 拷进抽验工程，否则范围断言在临时目录里必红。）
+
+11. **README 里写的是裸 `python scripts/...`，照它敲直接 `ModuleNotFoundError: pydantic`。**
+    用户级 PATH 上那个 `python` shim 没有第三方库，而 Task 2 之后每个脚本都 `import models`。
+    README 是「照着敲就该对」的地方。全部改成 `.venv/Scripts/python`，并在开头写清为什么。
+
 守卫本身也有牙齿，单独验过：临时塞一个「忘了重定向、直接往 `store.ROOT/bank/` 写」
 的用例，session teardown 立刻报 `AssertionError: 真数据被动过`。
 lint 闸门有同类的自测（`test_the_gate_actually_catches_something`），
-所以「121 passed」不等于「把规则调到空换来的绿」。
+所以「127 passed」不等于「把规则调到空换来的绿」。

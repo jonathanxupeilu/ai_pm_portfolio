@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -107,6 +108,13 @@ def assemble(dest: pathlib.Path) -> list[str]:
 
     t10 = _blocks(sec["Task 10"])
     (dest / "tests" / "test_lint.py").write_text(t10[0], encoding="utf-8")
+    # Task 10 的闸门范围含 docs/plans 下这两个脚本。抽验工程里也得有它们，
+    # 否则「验证工具自己游离在被验证之外」正是那条测试要拦的事——而它会红。
+    plans_dir = dest / "docs" / "plans"
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    here = pathlib.Path(__file__).resolve().parent
+    for src in sorted(here.glob("*.py")):
+        shutil.copy2(src, plans_dir / src.name)
     return notes
 
 

@@ -1,3 +1,4 @@
+import pytest
 import store
 from support import attempt_row, bank_row, run_cli, write_jsonl
 
@@ -112,3 +113,17 @@ def test_kind_outside_whitelist_is_rejected(data_dir):
     seed_bank(3)
     rc, _, _ = run_cli(bank.main, ["sample", "--kind", "瞎写"])
     assert rc != 0
+
+
+@pytest.mark.parametrize("bad", ['"5"', "true", "0", "null", "1.5", "{}"])
+def test_config_per_round_is_type_checked(bad, data_dir):
+    """`-n` 有 argparse 兜着，`per_round` 只有 `cmd_sample` 那一句守着。
+
+    不喂坏值就是没测：那句 `isinstance` 一旦被人「简化」成 `int(cfg[...])`，
+    true / null / {} 都会悄悄变成一个能抽题的数。
+    """
+    store.CONFIG_PATH.write_text(f'{{"per_round": {bad}}}', encoding="utf-8")
+    seed_bank(5)
+    rc, _, err = run_cli(bank.main, ["sample"])
+    assert rc == 1
+    assert "per_round" in err

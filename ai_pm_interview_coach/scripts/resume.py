@@ -15,6 +15,8 @@ import sys
 import urllib.error
 import urllib.request
 
+import models
+
 SERVER_NAME = "liepin-mcp"
 RESUME_TOOL = "my-resume"
 TIMEOUT = 60
@@ -84,11 +86,13 @@ def fetch_resume() -> str:
     实测形状：content[0].text 是 JSON
     {"data": {"result": <2745 字 markdown 文本>}, "errCode": 0}。
     errCode 非 0 或 result 为空都算失败——协议成功不等于业务有结论。
+    这两条的判断规则在 `models.ResumeEnvelope`，不在这里重写一遍。
     """
     resp = _rpc("tools/call", {"name": RESUME_TOOL, "arguments": {}}, 3)
     if "error" in resp:
         raise RuntimeError(f"MCP 调用 {RESUME_TOOL} 出错：{resp['error']}")
     result = resp.get("result") or {}
+    # 下面是 MCP 协议层的剥壳，不是业务规则：拿 content[0].text 那段 JSON 文本。
     text = next((c.get("text") for c in (result.get("content") or [])
                  if c.get("type") == "text"), None)
     if text is None:
@@ -97,12 +101,7 @@ def fetch_resume() -> str:
         data = json.loads(text)
     except json.JSONDecodeError:
         raise RuntimeError(f"{RESUME_TOOL} 的 content 不是 JSON：{text[:200]}") from None
-    if (data or {}).get("errCode") != 0:
-        raise RuntimeError(f"{RESUME_TOOL} 业务失败 errCode={(data or {}).get('errCode')!r}")
-    body = ((data or {}).get("data") or {}).get("result")
-    if not isinstance(body, str) or not body.strip():
-        raise RuntimeError(f"{RESUME_TOOL} 返回的 result 是空的——简历读不到，不是没写过")
-    return body
+    return models.parse_envelope(data).result
 
 
 def main(argv: list[str]) -> int:
@@ -111,7 +110,7 @@ def main(argv: list[str]) -> int:
         return 0
     try:
         sys.stdout.write(fetch_resume())
-    except RuntimeError as e:
+    except (RuntimeError, models.EnvelopeError) as e:
         print(f"❌ 读在线简历失败：{e}", file=sys.stderr)
         return 1
     except SystemExit as e:
