@@ -83,9 +83,15 @@ def main(argv: list[str]) -> int:
         "|---|---|---|---|---|---|---|",
     ]
     for i, r in enumerate(picked, 1):
+        # 表格里 `|` 是分隔符：岗位名/公司名里出现 `|` 会把这一行切错列，静默毁掉表格。
         hits = str(r.get("hits", "")).replace("|", "、") or "—"
+        name = str(r.get("jobName", "")).replace("|", "、").strip()
+        company = str(r.get("company", "")).replace("|", "、")
+        url = str(r.get("jobDetailUrl", "")).strip()
+        # 岗位名做成可点的链接：这张表就是拿来逐个核岗位的，不给链接等于逼人回猎聘再搜一遍。
+        title = f"[{name}]({url})" if url else name
         lines.append(
-            f"| {i} | {r['score']} | {r.get('jobName', '')} | {r.get('company', '')} "
+            f"| {i} | {r['score']} | {title} | {company} "
             f"| {r.get('salary', '')} | {r.get('location', '')} | {hits} |"
         )
 
