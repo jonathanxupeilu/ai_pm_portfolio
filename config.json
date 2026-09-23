@@ -1,0 +1,29 @@
+{
+  "_说明": "搜索配置。keywords × cities 两两组合，每个组合翻 pages_per_query 页（每页 20 条）。",
+
+  "matcher": "keyword",
+
+  "keywords": [
+    "AI产品经理",
+    "大模型产品经理",
+    "Agent产品经理"
+  ],
+
+  "cities": [
+    "上海"
+  ],
+
+  "pages_per_query": 1,
+
+  "max_per_round": 15,
+
+  "_search_filters说明": "对应 user-search-job 的筛选参数，留空表示不传该条件。salaryKind 只接受「月薪」或「年薪」。",
+  "search_filters": {
+    "workExperience": "",
+    "eduLevel": "",
+    "compNature": "",
+    "salaryFloor": "",
+    "salaryCap": "",
+    "salaryKind": ""
+  }
+}
