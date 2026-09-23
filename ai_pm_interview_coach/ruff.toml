@@ -1,0 +1,25 @@
+# 只挑「不修就会咬人」的规则，不做风格警察。
+# 项目里的中文是内容，不是注释——所以不该被当成非 ASCII 噪声报出来。
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+  "E9",    # 语法错误、缩进错误
+  "F",     # pyflakes：未用 import、未定义名、f-string 里没占位符
+  "B",     # bugbear：可变默认参、循环变量捕获、异常链丢失
+  "SIM",   # 可简化的写法
+  "UP",    # 该用新语法的地方（typing.Optional → X | None 之类）
+  "RUF",
+]
+ignore = [
+  "E501",  # 行长交给格式化，不当错误报——中文题面本来就长
+  "B008",
+  # 中文标点不是拼写错误。这三条会把「，」「：」「（）」全报成
+  # "Did you mean ,"——本项目里中文是内容（题面、报错文案），不是手滑。
+  # 关掉的是「ASCII 洁癖」，不是任何正确性规则。
+  "RUF001", "RUF002", "RUF003",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["B011"]

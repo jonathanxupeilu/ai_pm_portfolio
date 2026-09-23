@@ -204,7 +204,7 @@ __pycache__/
 > `.venv/` 必须挡掉：它上千个文件，而且里面**可能有可执行代码**，
 > 进版本库既撑大仓库又给供应链留口子。依赖用 `requirements.txt` 复现，不用 venv 本身。
 
-6. `README.md` 先一句话占位（Task 10 补全）：
+6. `README.md` 先一句话占位（Task 11 补全）：
 
 ```markdown
 # AI 产品经理面试出题教练
