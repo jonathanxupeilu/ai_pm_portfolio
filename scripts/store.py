@@ -26,6 +26,7 @@ POOL_FIELDS = [
     "education", "workYears", "industry", "companyTags", "financingStage",
     "companySize", "jobDetailUrl",
     "score", "hits",                      # 打分结果（score 为空 = 还没打分）
+    "criteriaFp",                         # 这个分数是按哪一版口径算的（见 matcher.fingerprint）
     "searchKeyword", "searchCity", "foundAt",
 ]
 

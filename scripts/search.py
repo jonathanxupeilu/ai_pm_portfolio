@@ -35,6 +35,7 @@ def build_row(raw: dict, keyword: str, city: str, today: str) -> dict:
         "companySize": raw.get("companySize", ""),
         "jobDetailUrl": raw.get("jobDetailUrl", ""),
         "score": "", "hits": "",
+        "criteriaFp": "",                   # 打分时由 score.py 填
         "searchKeyword": keyword, "searchCity": city, "foundAt": today,
     }
 

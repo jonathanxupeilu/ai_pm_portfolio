@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import pathlib
 from typing import Protocol
 
@@ -96,6 +97,21 @@ def load_criteria(path) -> list[tuple[str, float]]:
             f"❌ {path} 里没解析到关键词，请检查『| 关键词 | 权重 |』表头是否存在"
         )
     return terms
+
+
+def fingerprint(name: str, criteria_path) -> str:
+    """打分口径的短指纹，用来判断一个已存的分数是不是还有效。
+
+    刻意哈希**解析后的词表**（去重后按词排序）而不是 criteria.md 的文件字节：
+    改注释、加空行、调行序都不该让全池重算，只有真正会改变分数的改动
+    （加词/删词/改权重/换 matcher）才让指纹变。
+
+    不哈希行序，是因为 `匹配度 = 权重和 ÷ 总权重` 与顺序无关。
+    """
+    key = (name or "keyword").strip().lower()
+    pairs = sorted((str(t), float(w)) for t, w in load_criteria(criteria_path))
+    blob = "\n".join(f"{t}\t{w}" for t, w in pairs).encode("utf-8")
+    return f"{key}:{hashlib.sha256(blob).hexdigest()[:12]}"
 
 
 def get_matcher(name: str, criteria_path) -> Matcher:

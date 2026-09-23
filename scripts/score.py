@@ -75,7 +75,9 @@ def main(argv: list[str]) -> int:
     a = p.parse_args(argv)
 
     cfg = store.load_config()
-    m = matcher.get_matcher(cfg.get("matcher", "keyword"), store.CRITERIA_PATH)
+    matcher_name = cfg.get("matcher", "keyword")
+    m = matcher.get_matcher(matcher_name, store.CRITERIA_PATH)
+    fp = matcher.fingerprint(matcher_name, store.CRITERIA_PATH)
 
     rows = store.load_pool()
     if not rows:
@@ -83,26 +85,38 @@ def main(argv: list[str]) -> int:
         print("池子是空的，先跑 search.py")
         return 1
 
-    targets = [r for r in rows if a.rescore or not str(r.get("score", "")).strip()]
+    unscored = [r for r in rows if not str(r.get("score", "")).strip()]
+    # 「有分数、但分数是按另一版口径算的」和「没分数」一样不可用。不认这一条，
+    # 改完 criteria.md 再跑一次就会得到一张新旧口径混在一起的分数表。
+    stale = [r for r in rows
+             if str(r.get("score", "")).strip() and r.get("criteriaFp", "") != fp]
+
+    if stale:
+        print(f"⚠️  打分口径变了（当前 {fp}）：{len(stale)} 个岗位的分数是旧口径算的，"
+              f"本次一并重算。")
+        print("   （改过 criteria.md 或 config.json 的 matcher 就会这样。）")
+
+    targets = list(rows) if a.rescore else unscored + stale
     if a.limit is not None:
         targets = targets[:a.limit]
     if not targets:
-        print("没有待打分的岗位（要全部重算用 --rescore）")
+        print(f"没有待打分的岗位（口径 {fp}；要全部重算用 --rescore）")
         return 0
 
     ok = unknown = 0
     for r in targets:
         jid = r.get("jobId")
         name = str(r.get("jobName", ""))[:28]
-        if a.rescore:
-            # 重算前先清空：这次要是抓取失败，留下的必须是「还没打分」，
-            # 而不是一个按**旧口径**算出来的分数——旧分和新分混在一起，肉眼分不出来。
-            r["score"], r["hits"] = "", ""
+        # 进了 targets 就说明它现有的分数不算数（没分 / 旧口径 / --rescore），
+        # 所以先清空：这次要是抓取失败，留下的必须是「还没打分」，而不是一个
+        # 按旧口径算出来的分数——旧分和新分混在一起，肉眼是分不出来的。
+        r["score"], r["hits"], r["criteriaFp"] = "", "", ""
         try:
             text = fetch_jd_text(str(r.get("jobDetailUrl", "")))
             score, hits = m.score(text, r)          # text 只存在于这次循环里
             r["score"] = score
             r["hits"] = "|".join(hits)
+            r["criteriaFp"] = fp
             ok += 1
             print(f"✅ {jid} {name} → {score}  命中 {hits or '（无）'}")
         except Exception as e:
@@ -110,7 +124,7 @@ def main(argv: list[str]) -> int:
             print(f"❌ {jid} {name} → unknown：{e}\n   {r.get('jobDetailUrl', '')}")
 
     store.save_pool(rows)
-    print(f"\n打分完成 {ok} 个｜unknown {unknown} 个（分数留空，下次重试）")
+    print(f"\n打分完成 {ok} 个｜unknown {unknown} 个（分数留空，下次重试）｜口径 {fp}")
     if unknown:
         print("⚠️  有岗位判不出，已显式标 unknown 且未给默认分——请先看上面的失败原因。")
         return 1

@@ -13,6 +13,7 @@ import argparse
 import datetime
 import sys
 
+import matcher
 import store
 
 
@@ -24,6 +25,7 @@ def main(argv: list[str]) -> int:
 
     cfg = store.load_config()
     limit = a.max if a.max is not None else int(cfg.get("max_per_round", 15))
+    fp = matcher.fingerprint(cfg.get("matcher", "keyword"), store.CRITERIA_PATH)
 
     rows = store.load_pool()
     if not rows:
@@ -35,6 +37,10 @@ def main(argv: list[str]) -> int:
     applied = store.applied_ids()
     unscored = [r for r in rows if not str(r.get("score", "")).strip()]
     scored = [r for r in rows if str(r.get("score", "")).strip()]
+    # 分数是按旧口径算的 → 排序依据已经不作数。跟「没打分」一样排除掉，
+    # 否则会产出一张新旧口径混排的名单，而你没法从分数上看出哪一行是旧的。
+    stale = [r for r in scored if r.get("criteriaFp", "") != fp]
+    scored = [r for r in scored if r.get("criteriaFp", "") == fp]
     no_kind = [r for r in scored if not str(r.get("jobType", "")).strip()]
     already = [r for r in scored if str(r["jobId"]) in applied]
 
@@ -45,8 +51,11 @@ def main(argv: list[str]) -> int:
     eligible.sort(key=lambda r: float(r["score"]), reverse=True)
     picked = eligible[:limit]
 
-    print(f"池内 {len(rows)} 个 → 未打分 {len(unscored)}｜缺 jobKind {len(no_kind)}"
-          f"｜已投 {len(already)} → 可出名单 {len(eligible)}")
+    print(f"池内 {len(rows)} 个 → 未打分 {len(unscored)}｜旧口径 {len(stale)}"
+          f"｜缺 jobKind {len(no_kind)}｜已投 {len(already)} → 可出名单 {len(eligible)}")
+    if stale:
+        print(f"   ⚠️  {len(stale)} 个岗位的分数是按旧口径算的，已排除。"
+              f"（当前口径 {fp}）跑一次 score.py 会自动重算它们。")
     for r in no_kind:
         print(f"   ⚠️  缺 jobKind 已剔除：{r['jobId']} {r.get('jobName', '')}"
               f"（jobKind 必须来自搜索结果的 jobType，不猜值）")
@@ -78,7 +87,8 @@ def main(argv: list[str]) -> int:
     lines = [
         f"# 短名单 {today}", "",
         f"共 {len(picked)} 个（按匹配度降序）｜池内 {len(rows)} 个，"
-        f"已排除：未打分 {len(unscored)}、缺 jobKind {len(no_kind)}、已投 {len(already)}", "",
+        f"已排除：未打分 {len(unscored)}、旧口径 {len(stale)}、"
+        f"缺 jobKind {len(no_kind)}、已投 {len(already)}", "",
         "| # | 匹配度 | 岗位 | 公司 | 薪资 | 地点 | 命中词 |",
         "|---|---|---|---|---|---|---|",
     ]
