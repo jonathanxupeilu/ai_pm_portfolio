@@ -50,6 +50,10 @@
 
 ## 别做的事
 
+- **绝不要在此目录跑 `git clean -fdx` / `git clean -fdX`。** `pool/`、`ledger.csv`、
+  `shortlists/` 是被忽略的文件，而它们在这个工作区里是**唯一的一份**——`-x`/`-X` 会直接删掉
+  岗位池和投递台账，没有副本可恢复。要用 `git status --ignored` 看它们，不要清理它们。
+  动仓库历史（`reset --hard`、切换老提交）之前，先把这三个位置打包备份到仓库外的目录。
 - 不要参考本机其它求职项目（`~/WorkBuddy/job_seeking/`、`~/.workbuddy/career-facts/`、
   其它仓库里的同类技能）来「对齐」本项目的设计——这是从头另起的项目。
 - 不要提交 `_probe/`、临时抓取的 HTML、跑分产物。
