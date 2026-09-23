@@ -61,8 +61,9 @@
 
 ## 别做的事
 
-- **绝不要在此目录跑 `git clean -fdx` / `git clean -fdX`。** 这是唯一会删掉真实数据的
-  git 命令。2026-09-23 在临时仓库实测过边界：`git reset --hard`、`git checkout` 老提交、
+- **绝不要在仓库内任何位置跑 `git clean -fdx` / `git clean -fdX`。** 这是唯一会删掉真实数据的
+  git 命令。仓库根是 `ai_pm_portfolio`，在根目录跑同样会删掉 `job_seeking/` 下的数据。
+  2026-09-23 在临时仓库实测过边界：`git reset --hard`、`git checkout` 老提交、
   甚至 `git clean -fd`（**不带** `-x`）都**不会**动这些被忽略的文件——只有带 `-x`/`-X` 的
   `clean` 会删，而且删完恢复不了（它们从没被跟踪过，不在任何提交里）。
   之所以危险，是因为 `pool/`、`ledger.csv`、`shortlists/` 在这个工作区里就是**唯一的一份**：
