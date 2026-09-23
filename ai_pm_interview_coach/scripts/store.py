@@ -22,9 +22,15 @@ import models
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-BANK_PATH = ROOT / "bank" / "questions.jsonl"
-ATTEMPTS_PATH = ROOT / "attempts" / "attempts.jsonl"
-CONFIG_PATH = ROOT / "config.json"
+def _path_from_env(var: str, default: pathlib.Path) -> pathlib.Path:
+    """测试/多副本用的路径覆盖。没设就用项目内的默认位置。"""
+    val = os.environ.get(var)
+    return pathlib.Path(val) if val else default
+
+
+BANK_PATH = _path_from_env("COACH_BANK_PATH", ROOT / "bank" / "questions.jsonl")
+ATTEMPTS_PATH = _path_from_env("COACH_ATTEMPTS_PATH", ROOT / "attempts" / "attempts.jsonl")
+CONFIG_PATH = _path_from_env("COACH_CONFIG", ROOT / "config.json")
 
 # 名字在这里再导出一次，只为了让 `store.KINDS` 这种写法在计划里保持一致。
 # 定义只在 models.py 有一份。
