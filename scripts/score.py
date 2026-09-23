@@ -94,6 +94,10 @@ def main(argv: list[str]) -> int:
     for r in targets:
         jid = r.get("jobId")
         name = str(r.get("jobName", ""))[:28]
+        if a.rescore:
+            # 重算前先清空：这次要是抓取失败，留下的必须是「还没打分」，
+            # 而不是一个按**旧口径**算出来的分数——旧分和新分混在一起，肉眼分不出来。
+            r["score"], r["hits"] = "", ""
         try:
             text = fetch_jd_text(str(r.get("jobDetailUrl", "")))
             score, hits = m.score(text, r)          # text 只存在于这次循环里
