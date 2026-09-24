@@ -1,0 +1,5 @@
+# git worktree 隔离工作区（内容都是仓库内别处的副本，不进版本库）
+.worktrees/
+
+# Qoder 本机设置：逐条命令的授权白名单，含本机路径与用户名
+.qoder/settings.local.json
